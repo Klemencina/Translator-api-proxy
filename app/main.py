@@ -47,7 +47,8 @@ class TranslationRouter:
         errors: list[str] = []
 
         for provider_name in candidates:
-            if self._remaining(provider_name) < char_count:
+            reserved = self.quota_store.try_reserve(provider_name, char_count, self.quotas[provider_name])
+            if not reserved:
                 errors.append(f"{provider_name}: quota exceeded")
                 continue
 
@@ -55,10 +56,10 @@ class TranslationRouter:
             try:
                 result = await provider.translate(text, target_language, source_language)
             except Exception as exc:
+                self.quota_store.release(provider_name, char_count)
                 errors.append(f"{provider_name}: {exc}")
                 continue
 
-            self.quota_store.increment(provider_name, char_count)
             return TranslationResponse(
                 translated_text=result.translated_text,
                 provider=result.provider,

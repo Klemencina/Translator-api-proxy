@@ -97,4 +97,5 @@ Practical implication for this proxy:
 ## Notes
 
 - The router picks the provider with the most remaining characters and falls back if that provider fails or has no quota left.
+- Quota consumption is reserved atomically in SQLite before provider calls to prevent concurrent requests from overshooting monthly caps.
 - Quotas are tracked by month (`YYYY-MM`) in UTC.
