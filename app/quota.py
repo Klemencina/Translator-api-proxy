@@ -31,10 +31,25 @@ class QuotaStore:
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS rate_usage (
+                    provider TEXT NOT NULL,
+                    usage_minute TEXT NOT NULL,
+                    used_requests INTEGER NOT NULL DEFAULT 0,
+                    used_source_chars INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (provider, usage_minute)
+                )
+                """
+            )
 
     @staticmethod
     def current_month() -> str:
         return datetime.now(tz=timezone.utc).strftime("%Y-%m")
+
+    @staticmethod
+    def current_minute() -> str:
+        return datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M")
 
     def get_used(self, provider: str, month: str | None = None) -> int:
         usage_month = month or self.current_month()
@@ -76,3 +91,55 @@ class QuotaStore:
                 """,
                 (chars, chars, provider, usage_month),
             )
+
+    def try_consume_rate_limit(
+        self,
+        provider: str,
+        request_units: int,
+        source_char_units: int,
+        max_requests_per_minute: int,
+        max_source_chars_per_minute: int,
+        minute: str | None = None,
+    ) -> bool:
+        usage_minute = minute or self.current_minute()
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO rate_usage(provider, usage_minute, used_requests, used_source_chars)
+                VALUES(?, ?, 0, 0)
+                """,
+                (provider, usage_minute),
+            )
+            result = conn.execute(
+                """
+                UPDATE rate_usage
+                SET used_requests = used_requests + ?,
+                    used_source_chars = used_source_chars + ?
+                WHERE provider = ?
+                  AND usage_minute = ?
+                  AND used_requests + ? <= ?
+                  AND used_source_chars + ? <= ?
+                """,
+                (
+                    request_units,
+                    source_char_units,
+                    provider,
+                    usage_minute,
+                    request_units,
+                    max_requests_per_minute,
+                    source_char_units,
+                    max_source_chars_per_minute,
+                ),
+            )
+        return result.rowcount == 1
+
+    def get_rate_usage(self, provider: str, minute: str | None = None) -> tuple[int, int]:
+        usage_minute = minute or self.current_minute()
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT used_requests, used_source_chars FROM rate_usage WHERE provider = ? AND usage_minute = ?",
+                (provider, usage_minute),
+            ).fetchone()
+        if not row:
+            return (0, 0)
+        return int(row[0]), int(row[1])

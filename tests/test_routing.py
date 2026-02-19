@@ -71,3 +71,23 @@ def test_returns_503_when_all_quotas_exceeded(tmp_path: Path):
         assert response.status_code == 503
     finally:
         cleanup()
+
+
+def test_batch_translate_processes_multiple_requests(tmp_path: Path):
+    client, cleanup = _build_client(tmp_path, BATCH_MAX_CONCURRENCY="2")
+    try:
+        response = client.post(
+            "/translate/batch",
+            json={
+                "requests": [
+                    {"text": "hello", "target_language": "es"},
+                    {"text": "world", "target_language": "fr"},
+                ]
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert len(payload["results"]) == 2
+        assert all(item["ok"] for item in payload["results"])
+    finally:
+        cleanup()

@@ -1,9 +1,19 @@
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import FastAPI, HTTPException
 
 from app.config import Settings, load_settings
-from app.models import ProviderUsage, TranslationRequest, TranslationResponse, UsageResponse
+from app.models import (
+    BatchTranslationRequest,
+    BatchTranslationResponse,
+    BatchTranslationResult,
+    ProviderUsage,
+    TranslationRequest,
+    TranslationResponse,
+    UsageResponse,
+)
 from app.providers import DeepLProvider, GoogleProvider, MicrosoftProvider, ProviderError, TranslationProvider
 from app.quota import QuotaStore
 
@@ -21,6 +31,11 @@ class TranslationRouter:
             "google": settings.google_quota.monthly_chars,
             "microsoft": settings.microsoft_quota.monthly_chars,
             "deepl": settings.deepl_quota.monthly_chars,
+        }
+        self.rate_limits = {
+            "google": settings.google_rate_limit,
+            "microsoft": settings.microsoft_rate_limit,
+            "deepl": settings.deepl_rate_limit,
         }
 
     def _remaining(self, provider: str) -> int:
@@ -47,6 +62,18 @@ class TranslationRouter:
         errors: list[str] = []
 
         for provider_name in candidates:
+            rate = self.rate_limits[provider_name]
+            allowed_by_rate = self.quota_store.try_consume_rate_limit(
+                provider=provider_name,
+                request_units=1,
+                source_char_units=char_count,
+                max_requests_per_minute=rate.requests_per_minute,
+                max_source_chars_per_minute=rate.source_chars_per_minute,
+            )
+            if not allowed_by_rate:
+                errors.append(f"{provider_name}: provider rate limit reached")
+                continue
+
             reserved = self.quota_store.try_reserve(provider_name, char_count, self.quotas[provider_name])
             if not reserved:
                 errors.append(f"{provider_name}: quota exceeded")
@@ -90,6 +117,24 @@ def create_app() -> FastAPI:
             return await router.translate(req.text, req.target_language, req.source_language)
         except ProviderError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    @app.post("/translate/batch", response_model=BatchTranslationResponse)
+    async def translate_batch(req: BatchTranslationRequest) -> BatchTranslationResponse:
+        semaphore = asyncio.Semaphore(max(settings.batch_max_concurrency, 1))
+
+        async def one(index: int, item: TranslationRequest) -> BatchTranslationResult:
+            async with semaphore:
+                try:
+                    result = await router.translate(item.text, item.target_language, item.source_language)
+                    return BatchTranslationResult(index=index, ok=True, result=result)
+                except HTTPException as exc:
+                    return BatchTranslationResult(index=index, ok=False, error=str(exc.detail))
+                except Exception as exc:
+                    return BatchTranslationResult(index=index, ok=False, error=str(exc))
+
+        tasks = [one(index, item) for index, item in enumerate(req.requests)]
+        results = await asyncio.gather(*tasks)
+        return BatchTranslationResponse(results=results)
 
     return app
 

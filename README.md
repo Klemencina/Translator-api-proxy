@@ -4,7 +4,8 @@ A single translation endpoint that routes requests across Google, Microsoft Tran
 
 ## Features
 
-- `POST /translate` accepts translation requests and automatically chooses a provider with available quota.
+- `POST /translate` accepts single translation requests and chooses a provider with available quota and rate-limit capacity.
+- `POST /translate/batch` accepts multiple translation requests and processes them concurrently (bounded concurrency).
 - `GET /usage` shows monthly usage and remaining characters per provider.
 - SQLite-backed usage tracking (safe to run locally, easy to persist in a volume).
 - Configurable quotas and API credentials via environment variables.
@@ -45,6 +46,30 @@ Response:
   "translated_text": "Hola mundo",
   "provider": "deepl",
   "characters_charged": 11
+}
+```
+
+### Batch translate
+
+`POST /translate/batch`
+
+```json
+{
+  "requests": [
+    {"text": "Hello", "source_language": "en", "target_language": "es"},
+    {"text": "How are you?", "source_language": "en", "target_language": "fr"}
+  ]
+}
+```
+
+Response:
+
+```json
+{
+  "results": [
+    {"index": 0, "ok": true, "result": {"translated_text": "Hola", "provider": "deepl", "characters_charged": 5}, "error": null},
+    {"index": 1, "ok": true, "result": {"translated_text": "Comment ça va ?", "provider": "microsoft", "characters_charged": 12}, "error": null}
+  ]
 }
 ```
 
@@ -92,10 +117,18 @@ Practical implication for this proxy:
 | `MICROSOFT_MONTHLY_CHAR_QUOTA` | `2000000` | Monthly Microsoft character quota |
 | `DEEPL_MONTHLY_CHAR_QUOTA` | `500000` | Monthly DeepL character quota |
 | `REQUEST_TIMEOUT_SECONDS` | `15` | Upstream API timeout |
+| `GOOGLE_REQUESTS_PER_MINUTE` | `60` | Google request rate limit enforced by proxy |
+| `GOOGLE_SOURCE_CHARS_PER_MINUTE` | `100000` | Google source-character per-minute limit enforced by proxy |
+| `MICROSOFT_REQUESTS_PER_MINUTE` | `60` | Microsoft request rate limit enforced by proxy |
+| `MICROSOFT_SOURCE_CHARS_PER_MINUTE` | `100000` | Microsoft source-character per-minute limit enforced by proxy |
+| `DEEPL_REQUESTS_PER_MINUTE` | `60` | DeepL request rate limit enforced by proxy |
+| `DEEPL_SOURCE_CHARS_PER_MINUTE` | `100000` | DeepL source-character per-minute limit enforced by proxy |
+| `BATCH_MAX_CONCURRENCY` | `5` | Max concurrent translations processed in `/translate/batch` |
 | `MOCK_TRANSLATION` | `false` | If `true`, mock translation responses |
 
 ## Notes
 
 - The router picks the provider with the most remaining characters and falls back if that provider fails or has no quota left.
 - Quota consumption is reserved atomically in SQLite before provider calls to prevent concurrent requests from overshooting monthly caps.
+- Provider per-minute request/character limits are enforced in SQLite so concurrent traffic cannot exceed configured rate limits.
 - Quotas are tracked by month (`YYYY-MM`) in UTC.

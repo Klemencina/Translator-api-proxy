@@ -22,6 +22,21 @@ class TranslationResponse(BaseModel):
     characters_charged: int
 
 
+class BatchTranslationRequest(BaseModel):
+    requests: list[TranslationRequest] = Field(min_length=1)
+
+
+class BatchTranslationResult(BaseModel):
+    index: int
+    ok: bool
+    result: TranslationResponse | None = None
+    error: str | None = None
+
+
+class BatchTranslationResponse(BaseModel):
+    results: list[BatchTranslationResult]
+
+
 class ProviderUsage(BaseModel):
     provider: str
     used_characters: int
