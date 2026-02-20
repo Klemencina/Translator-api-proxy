@@ -22,24 +22,37 @@ class TranslationRouter:
     def __init__(self, settings: Settings, quota_store: QuotaStore) -> None:
         self.settings = settings
         self.quota_store = quota_store
+        self.provider_order = ["deepl", "microsoft", "google", "microsoft_paid"]
         self.providers: dict[str, TranslationProvider] = {
-            "google": GoogleProvider(settings),
-            "microsoft": MicrosoftProvider(settings),
             "deepl": DeepLProvider(settings),
+            "microsoft": MicrosoftProvider(
+                settings,
+                name="microsoft",
+                api_key=settings.microsoft_api_key,
+                location=settings.microsoft_location,
+                endpoint=settings.microsoft_endpoint,
+            ),
+            "google": GoogleProvider(settings),
+            "microsoft_paid": MicrosoftProvider(
+                settings,
+                name="microsoft_paid",
+                api_key=settings.microsoft_fallback_api_key,
+                location=settings.microsoft_fallback_location,
+                endpoint=settings.microsoft_fallback_endpoint,
+            ),
         }
         self.quotas = {
-            "google": settings.google_quota.monthly_chars,
-            "microsoft": settings.microsoft_quota.monthly_chars,
             "deepl": settings.deepl_quota.monthly_chars,
+            "microsoft": settings.microsoft_quota.monthly_chars,
+            "google": settings.google_quota.monthly_chars,
+            "microsoft_paid": settings.microsoft_fallback_quota.monthly_chars,
         }
         self.rate_limits = {
-            "google": settings.google_rate_limit,
-            "microsoft": settings.microsoft_rate_limit,
             "deepl": settings.deepl_rate_limit,
+            "microsoft": settings.microsoft_rate_limit,
+            "google": settings.google_rate_limit,
+            "microsoft_paid": settings.microsoft_fallback_rate_limit,
         }
-
-    def _remaining(self, provider: str) -> int:
-        return self.quotas[provider] - self.quota_store.get_used(provider)
 
     def provider_usage(self) -> UsageResponse:
         month = self.quota_store.current_month()
@@ -58,7 +71,7 @@ class TranslationRouter:
 
     async def translate(self, text: str, target_language: str, source_language: str | None) -> TranslationResponse:
         char_count = len(text)
-        candidates = sorted(self.providers.keys(), key=self._remaining, reverse=True)
+        candidates = self.provider_order
         errors: list[str] = []
 
         for provider_name in candidates:

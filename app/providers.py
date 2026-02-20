@@ -56,19 +56,26 @@ class GoogleProvider(TranslationProvider):
 
 
 class MicrosoftProvider(TranslationProvider):
-    name = "microsoft"
-
-    def __init__(self, settings: Settings) -> None:
-        self.api_key = settings.microsoft_api_key
-        self.region = settings.microsoft_region
+    def __init__(
+        self,
+        settings: Settings,
+        name: str,
+        api_key: str | None,
+        location: str | None,
+        endpoint: str | None,
+    ) -> None:
+        self.name = name
+        self.api_key = api_key
+        self.location = location
+        self.endpoint = endpoint
         self.timeout = settings.request_timeout_seconds
         self.mock = settings.mock_translation
 
     async def translate(self, text: str, target_language: str, source_language: str | None) -> ProviderResult:
         if self.mock:
-            return ProviderResult(provider=self.name, translated_text=f"[microsoft] {text}")
-        if not self.api_key or not self.region:
-            raise ProviderError("MICROSOFT_TRANSLATOR_KEY and MICROSOFT_TRANSLATOR_REGION must be configured")
+            return ProviderResult(provider=self.name, translated_text=f"[{self.name}] {text}")
+        if not self.api_key or not self.location or not self.endpoint:
+            raise ProviderError(f"{self.name} is not fully configured")
 
         params = {"api-version": "3.0", "to": target_language}
         if source_language:
@@ -76,7 +83,7 @@ class MicrosoftProvider(TranslationProvider):
 
         headers = {
             "Ocp-Apim-Subscription-Key": self.api_key,
-            "Ocp-Apim-Subscription-Region": self.region,
+            "Ocp-Apim-Subscription-Region": self.location,
             "Content-Type": "application/json",
         }
 
@@ -84,7 +91,7 @@ class MicrosoftProvider(TranslationProvider):
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             resp = await client.post(
-                "https://api.cognitive.microsofttranslator.com/translate",
+                self.endpoint,
                 params=params,
                 headers=headers,
                 json=body,

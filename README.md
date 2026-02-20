@@ -1,10 +1,10 @@
 # Translator API Proxy
 
-A single translation endpoint that routes requests across Google, Microsoft Translator, and DeepL while tracking monthly character usage so you stay in free-tier limits.
+A single translation endpoint that routes requests across DeepL, Microsoft Translator, Google, and an optional paid Microsoft fallback while tracking monthly character usage.
 
 ## Features
 
-- `POST /translate` accepts single translation requests and chooses a provider with available quota and rate-limit capacity.
+- `POST /translate` accepts single translation requests and tries providers in fixed order: `deepl` -> `microsoft` -> `google` -> `microsoft_paid`.
 - `POST /translate/batch` accepts multiple translation requests and processes them concurrently (bounded concurrency).
 - `GET /usage` shows monthly usage and remaining characters per provider.
 - SQLite-backed usage tracking (safe to run locally, easy to persist in a volume).
@@ -19,6 +19,37 @@ source .venv/bin/activate
 pip install -e .
 uvicorn app.main:app --reload
 ```
+
+## Deploy on Coolify
+
+This repo is ready for Dockerfile-based deployment in Coolify.
+
+1. Create a new **Application** in Coolify and connect this repository.
+2. Build pack: **Dockerfile** (repo root).
+3. Exposed/internal port: `8000`.
+4. Health check path: `/health`.
+5. Add persistent storage and mount it to `/data`.
+6. Set `USAGE_DB_PATH=/data/usage.db` so usage tracking survives restarts.
+7. Add provider credentials (real mode):
+    - `GOOGLE_API_KEY`
+    - `MICROSOFT_TRANSLATOR_KEY`
+    - `MICROSOFT_TRANSLATOR_LOCATION`
+    - `MICROSOFT_TRANSLATOR_ENDPOINT`
+    - `MICROSOFT_FALLBACK_TRANSLATOR_KEY`
+    - `MICROSOFT_FALLBACK_TRANSLATOR_LOCATION`
+    - `MICROSOFT_FALLBACK_TRANSLATOR_ENDPOINT`
+    - `DEEPL_API_KEY`
+8. Set `MOCK_TRANSLATION=false`.
+
+You can copy `.env.example` as a starting point for your Coolify environment variables.
+
+Recommended: run a single instance/replica while using SQLite (`usage.db`).
+
+After deployment, verify:
+
+- `GET /health`
+- `POST /translate`
+- `GET /usage`
 
 ## API
 
@@ -111,16 +142,23 @@ Practical implication for this proxy:
 | `USAGE_DB_PATH` | `usage.db` | SQLite DB path for usage records |
 | `GOOGLE_API_KEY` | unset | Google Translate API key |
 | `MICROSOFT_TRANSLATOR_KEY` | unset | Microsoft Translator key |
-| `MICROSOFT_TRANSLATOR_REGION` | unset | Microsoft Translator resource region |
+| `MICROSOFT_TRANSLATOR_LOCATION` | unset | Microsoft Translator resource location |
+| `MICROSOFT_TRANSLATOR_ENDPOINT` | `https://api.cognitive.microsofttranslator.com/translate` | Microsoft Translator endpoint |
+| `MICROSOFT_FALLBACK_TRANSLATOR_KEY` | unset | Paid fallback Microsoft Translator key |
+| `MICROSOFT_FALLBACK_TRANSLATOR_LOCATION` | primary location | Paid fallback Microsoft Translator location |
+| `MICROSOFT_FALLBACK_TRANSLATOR_ENDPOINT` | primary endpoint | Paid fallback Microsoft Translator endpoint |
 | `DEEPL_API_KEY` | unset | DeepL API key |
 | `GOOGLE_MONTHLY_CHAR_QUOTA` | `500000` | Monthly Google character quota |
 | `MICROSOFT_MONTHLY_CHAR_QUOTA` | `2000000` | Monthly Microsoft character quota |
+| `MICROSOFT_FALLBACK_MONTHLY_CHAR_QUOTA` | `10000000` | Monthly paid fallback Microsoft character quota |
 | `DEEPL_MONTHLY_CHAR_QUOTA` | `500000` | Monthly DeepL character quota |
 | `REQUEST_TIMEOUT_SECONDS` | `15` | Upstream API timeout |
 | `GOOGLE_REQUESTS_PER_MINUTE` | `60` | Google request rate limit enforced by proxy |
 | `GOOGLE_SOURCE_CHARS_PER_MINUTE` | `100000` | Google source-character per-minute limit enforced by proxy |
 | `MICROSOFT_REQUESTS_PER_MINUTE` | `60` | Microsoft request rate limit enforced by proxy |
 | `MICROSOFT_SOURCE_CHARS_PER_MINUTE` | `100000` | Microsoft source-character per-minute limit enforced by proxy |
+| `MICROSOFT_FALLBACK_REQUESTS_PER_MINUTE` | `MICROSOFT_REQUESTS_PER_MINUTE` | Paid fallback Microsoft request rate limit |
+| `MICROSOFT_FALLBACK_SOURCE_CHARS_PER_MINUTE` | `MICROSOFT_SOURCE_CHARS_PER_MINUTE` | Paid fallback Microsoft source-char rate limit |
 | `DEEPL_REQUESTS_PER_MINUTE` | `60` | DeepL request rate limit enforced by proxy |
 | `DEEPL_SOURCE_CHARS_PER_MINUTE` | `100000` | DeepL source-character per-minute limit enforced by proxy |
 | `BATCH_MAX_CONCURRENCY` | `5` | Max concurrent translations processed in `/translate/batch` |
@@ -128,7 +166,9 @@ Practical implication for this proxy:
 
 ## Notes
 
-- The router picks the provider with the most remaining characters and falls back if that provider fails or has no quota left.
+- Provider priority is fixed: `deepl`, then `microsoft`, then `google`, then `microsoft_paid`.
+- `MICROSOFT_TRANSLATOR_REGION` is still accepted as a backward-compatible alias for `MICROSOFT_TRANSLATOR_LOCATION`.
+- `MICROSOFT_PAID_TRANSLATOR_*` is also accepted as an alias for `MICROSOFT_FALLBACK_TRANSLATOR_*`.
 - Quota consumption is reserved atomically in SQLite before provider calls to prevent concurrent requests from overshooting monthly caps.
 - Provider per-minute request/character limits are enforced in SQLite so concurrent traffic cannot exceed configured rate limits.
 - Quotas are tracked by month (`YYYY-MM`) in UTC.
