@@ -30,7 +30,8 @@ This repo is ready for Dockerfile-based deployment in Coolify.
 4. Health check path: `/health`.
 5. Add persistent storage and mount it to `/data`.
 6. Set `USAGE_DB_PATH=/data/usage.db` so usage tracking survives restarts.
-7. Add provider credentials (real mode):
+7. Set `TRANSLATOR_API_KEY` to a long random secret.
+8. Add provider credentials (real mode):
     - `GOOGLE_API_KEY`
     - `MICROSOFT_TRANSLATOR_KEY`
     - `MICROSOFT_TRANSLATOR_LOCATION`
@@ -39,7 +40,7 @@ This repo is ready for Dockerfile-based deployment in Coolify.
     - `MICROSOFT_FALLBACK_TRANSLATOR_LOCATION`
     - `MICROSOFT_FALLBACK_TRANSLATOR_ENDPOINT`
     - `DEEPL_API_KEY`
-8. Set `MOCK_TRANSLATION=false`.
+9. Set `MOCK_TRANSLATION=false`.
 
 You can copy `.env.example` as a starting point for your Coolify environment variables.
 
@@ -48,14 +49,22 @@ Recommended: run a single instance/replica while using SQLite (`usage.db`).
 After deployment, verify:
 
 - `GET /health`
-- `POST /translate`
-- `GET /usage`
+- `POST /translate` with `X-API-Key: <your key>`
+- `GET /usage` with `X-API-Key: <your key>`
 
 ## API
 
 ### Translate
 
 `POST /translate`
+
+Requires authentication header:
+
+- `X-API-Key: <TRANSLATOR_API_KEY>`
+
+Alternative:
+
+- `Authorization: Bearer <TRANSLATOR_API_KEY>`
 
 You can send both the **original language** and the **language to translate into**.
 
@@ -140,6 +149,7 @@ Practical implication for this proxy:
 | Variable | Default | Description |
 |---|---:|---|
 | `USAGE_DB_PATH` | `usage.db` | SQLite DB path for usage records |
+| `TRANSLATOR_API_KEY` | unset | If set, protects `/translate`, `/translate/batch`, and `/usage` |
 | `GOOGLE_API_KEY` | unset | Google Translate API key |
 | `MICROSOFT_TRANSLATOR_KEY` | unset | Microsoft Translator key |
 | `MICROSOFT_TRANSLATOR_LOCATION` | unset | Microsoft Translator resource location |
@@ -167,6 +177,7 @@ Practical implication for this proxy:
 ## Notes
 
 - Provider priority is fixed: `deepl`, then `microsoft`, then `google`, then `microsoft_paid`.
+- If `TRANSLATOR_API_KEY` is set, `/translate`, `/translate/batch`, and `/usage` require it; `/health` stays public.
 - `MICROSOFT_TRANSLATOR_REGION` is still accepted as a backward-compatible alias for `MICROSOFT_TRANSLATOR_LOCATION`.
 - `MICROSOFT_PAID_TRANSLATOR_*` is also accepted as an alias for `MICROSOFT_FALLBACK_TRANSLATOR_*`.
 - Quota consumption is reserved atomically in SQLite before provider calls to prevent concurrent requests from overshooting monthly caps.

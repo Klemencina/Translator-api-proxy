@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import secrets
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 
 from app.config import Settings, load_settings
 from app.models import (
@@ -114,24 +115,39 @@ def create_app() -> FastAPI:
     quota_store = QuotaStore(settings.database_path)
     router = TranslationRouter(settings, quota_store)
 
+    async def require_api_key(
+        x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+        authorization: str | None = Header(default=None),
+    ) -> None:
+        expected = settings.translator_api_key
+        if not expected:
+            return
+
+        provided = x_api_key
+        if provided is None and authorization and authorization.lower().startswith("bearer "):
+            provided = authorization[7:].strip()
+
+        if not provided or not secrets.compare_digest(provided, expected):
+            raise HTTPException(status_code=401, detail="Unauthorized")
+
     app = FastAPI(title="Translator API Proxy", version="0.1.0")
 
     @app.get("/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    @app.get("/usage", response_model=UsageResponse)
+    @app.get("/usage", response_model=UsageResponse, dependencies=[Depends(require_api_key)])
     async def usage() -> UsageResponse:
         return router.provider_usage()
 
-    @app.post("/translate", response_model=TranslationResponse)
+    @app.post("/translate", response_model=TranslationResponse, dependencies=[Depends(require_api_key)])
     async def translate(req: TranslationRequest) -> TranslationResponse:
         try:
             return await router.translate(req.text, req.target_language, req.source_language)
         except ProviderError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    @app.post("/translate/batch", response_model=BatchTranslationResponse)
+    @app.post("/translate/batch", response_model=BatchTranslationResponse, dependencies=[Depends(require_api_key)])
     async def translate_batch(req: BatchTranslationRequest) -> BatchTranslationResponse:
         semaphore = asyncio.Semaphore(max(settings.batch_max_concurrency, 1))
 

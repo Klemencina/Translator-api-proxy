@@ -40,6 +40,7 @@ class Settings:
     request_timeout_seconds: float
     mock_translation: bool
     batch_max_concurrency: int
+    translator_api_key: str | None
 
 
 def _int_env(name: str, default: int) -> int:
@@ -129,4 +130,5 @@ def load_settings() -> Settings:
         request_timeout_seconds=_float_env("REQUEST_TIMEOUT_SECONDS", 15.0),
         mock_translation=os.getenv("MOCK_TRANSLATION", "false").lower() == "true",
         batch_max_concurrency=_int_env("BATCH_MAX_CONCURRENCY", 5),
+        translator_api_key=_env("TRANSLATOR_API_KEY"),
     )

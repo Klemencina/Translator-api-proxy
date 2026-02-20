@@ -150,3 +150,26 @@ def test_batch_translate_processes_multiple_requests(tmp_path: Path):
         assert all(item["ok"] for item in payload["results"])
     finally:
         cleanup()
+
+
+def test_requires_api_key_when_configured(tmp_path: Path):
+    client, cleanup = _build_client(tmp_path, TRANSLATOR_API_KEY="super-secret")
+    try:
+        response = client.post("/translate", json={"text": "hello", "target_language": "es"})
+        assert response.status_code == 401
+
+        response = client.post(
+            "/translate",
+            json={"text": "hello", "target_language": "es"},
+            headers={"X-API-Key": "wrong"},
+        )
+        assert response.status_code == 401
+
+        response = client.post(
+            "/translate",
+            json={"text": "hello", "target_language": "es"},
+            headers={"X-API-Key": "super-secret"},
+        )
+        assert response.status_code == 200
+    finally:
+        cleanup()
