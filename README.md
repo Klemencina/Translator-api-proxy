@@ -5,8 +5,10 @@ A single translation endpoint that routes requests across DeepL, Microsoft Trans
 ## Features
 
 - `POST /translate` accepts single translation requests and tries providers in fixed order: `deepl` -> `microsoft` -> `google` -> `microsoft_paid`.
+- `POST /translate/{provider}` forces translation through one provider (`deepl`, `microsoft`, `google`, or `microsoft_paid`).
 - `POST /translate/batch` accepts multiple translation requests and processes them concurrently (bounded concurrency).
 - `GET /usage` shows monthly usage and remaining characters per provider.
+- `GET /usage/{provider}` shows monthly usage and current-minute rate usage for one provider.
 - SQLite-backed usage tracking (safe to run locally, easy to persist in a volume).
 - Configurable quotas and API credentials via environment variables.
 - Optional `MOCK_TRANSLATION=true` mode for local testing without real API keys.
@@ -89,6 +91,25 @@ Response:
 }
 ```
 
+### Translate with specific provider
+
+`POST /translate/{provider}` where `{provider}` is one of:
+
+- `deepl`
+- `microsoft`
+- `google`
+- `microsoft_paid`
+
+Example:
+
+```json
+{
+  "text": "Hello world",
+  "source_language": "en",
+  "target_language": "it"
+}
+```
+
 ### Batch translate
 
 `POST /translate/batch`
@@ -128,6 +149,24 @@ Response:
       "remaining_characters": 499000
     }
   ]
+}
+```
+
+### Usage for specific provider
+
+`GET /usage/{provider}`
+
+```json
+{
+  "provider": "microsoft",
+  "used_characters": 1234,
+  "monthly_quota": 2000000,
+  "remaining_characters": 1998766,
+  "current_minute": "2026-02-21T03:31",
+  "requests_this_minute": 22,
+  "source_characters_this_minute": 15340,
+  "requests_per_minute_limit": 60,
+  "source_characters_per_minute_limit": 100000
 }
 ```
 

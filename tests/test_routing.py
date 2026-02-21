@@ -173,3 +173,50 @@ def test_requires_api_key_when_configured(tmp_path: Path):
         assert response.status_code == 200
     finally:
         cleanup()
+
+
+def test_translate_specific_provider_forces_microsoft_usage(tmp_path: Path):
+    client, cleanup = _build_client(tmp_path)
+    try:
+        response = client.post("/translate/microsoft", json={"text": "hello", "target_language": "it"})
+        assert response.status_code == 200
+        assert response.json()["provider"] == "microsoft"
+
+        usage = client.get("/usage").json()
+        microsoft = next(p for p in usage["providers"] if p["provider"] == "microsoft")
+        deepl = next(p for p in usage["providers"] if p["provider"] == "deepl")
+        assert microsoft["used_characters"] == 5
+        assert deepl["used_characters"] == 0
+    finally:
+        cleanup()
+
+
+def test_translate_specific_provider_returns_503_when_that_provider_unavailable(tmp_path: Path):
+    client, cleanup = _build_client(tmp_path, MICROSOFT_MONTHLY_CHAR_QUOTA="4")
+    try:
+        response = client.post("/translate/microsoft", json={"text": "hello", "target_language": "it"})
+        assert response.status_code == 503
+        assert "microsoft: quota exceeded" in response.json()["detail"]
+    finally:
+        cleanup()
+
+
+def test_usage_for_specific_provider_includes_rate_limit_fields(tmp_path: Path):
+    client, cleanup = _build_client(tmp_path)
+    try:
+        response = client.post("/translate/microsoft", json={"text": "hello", "target_language": "it"})
+        assert response.status_code == 200
+
+        usage = client.get("/usage/microsoft")
+        assert usage.status_code == 200
+        payload = usage.json()
+        assert payload["provider"] == "microsoft"
+        assert payload["used_characters"] == 5
+        assert payload["monthly_quota"] == 8
+        assert payload["remaining_characters"] == 3
+        assert payload["requests_per_minute_limit"] == 60
+        assert payload["source_characters_per_minute_limit"] == 100000
+        assert payload["requests_this_minute"] >= 0
+        assert payload["source_characters_this_minute"] >= 0
+    finally:
+        cleanup()

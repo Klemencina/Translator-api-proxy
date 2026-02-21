@@ -5,12 +5,14 @@ import secrets
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 
-from app.config import Settings, load_settings
+from app.config import ProviderRateLimit, Settings, load_settings
 from app.models import (
     BatchTranslationRequest,
     BatchTranslationResponse,
     BatchTranslationResult,
+    ProviderName,
     ProviderUsage,
+    ProviderUsageDetails,
     TranslationRequest,
     TranslationResponse,
     UsageResponse,
@@ -23,8 +25,8 @@ class TranslationRouter:
     def __init__(self, settings: Settings, quota_store: QuotaStore) -> None:
         self.settings = settings
         self.quota_store = quota_store
-        self.provider_order = ["deepl", "microsoft", "google", "microsoft_paid"]
-        self.providers: dict[str, TranslationProvider] = {
+        self.provider_order: list[ProviderName] = ["deepl", "microsoft", "google", "microsoft_paid"]
+        self.providers: dict[ProviderName, TranslationProvider] = {
             "deepl": DeepLProvider(settings),
             "microsoft": MicrosoftProvider(
                 settings,
@@ -42,37 +44,60 @@ class TranslationRouter:
                 endpoint=settings.microsoft_fallback_endpoint,
             ),
         }
-        self.quotas = {
+        self.quotas: dict[ProviderName, int] = {
             "deepl": settings.deepl_quota.monthly_chars,
             "microsoft": settings.microsoft_quota.monthly_chars,
             "google": settings.google_quota.monthly_chars,
             "microsoft_paid": settings.microsoft_fallback_quota.monthly_chars,
         }
-        self.rate_limits = {
+        self.rate_limits: dict[ProviderName, ProviderRateLimit] = {
             "deepl": settings.deepl_rate_limit,
             "microsoft": settings.microsoft_rate_limit,
             "google": settings.google_rate_limit,
             "microsoft_paid": settings.microsoft_fallback_rate_limit,
         }
 
+    def _provider_usage(self, provider: ProviderName, month: str) -> ProviderUsage:
+        quota = self.quotas[provider]
+        used = self.quota_store.get_used(provider, month)
+        return ProviderUsage(
+            provider=provider,
+            used_characters=used,
+            monthly_quota=quota,
+            remaining_characters=max(quota - used, 0),
+        )
+
     def provider_usage(self) -> UsageResponse:
         month = self.quota_store.current_month()
-        providers = []
-        for name, quota in self.quotas.items():
-            used = self.quota_store.get_used(name, month)
-            providers.append(
-                ProviderUsage(
-                    provider=name,
-                    used_characters=used,
-                    monthly_quota=quota,
-                    remaining_characters=max(quota - used, 0),
-                )
-            )
+        providers = [self._provider_usage(name, month) for name in self.provider_order]
         return UsageResponse(month=month, providers=providers)
 
-    async def translate(self, text: str, target_language: str, source_language: str | None) -> TranslationResponse:
+    def provider_usage_details(self, provider: ProviderName) -> ProviderUsageDetails:
+        month = self.quota_store.current_month()
+        minute = self.quota_store.current_minute()
+        usage = self._provider_usage(provider, month)
+        req_used, source_chars_used = self.quota_store.get_rate_usage(provider, minute=minute)
+        rate_limit = self.rate_limits[provider]
+        return ProviderUsageDetails(
+            provider=provider,
+            used_characters=usage.used_characters,
+            monthly_quota=usage.monthly_quota,
+            remaining_characters=usage.remaining_characters,
+            current_minute=minute,
+            requests_this_minute=req_used,
+            source_characters_this_minute=source_chars_used,
+            requests_per_minute_limit=rate_limit.requests_per_minute,
+            source_characters_per_minute_limit=rate_limit.source_chars_per_minute,
+        )
+
+    async def _translate_with_candidates(
+        self,
+        candidates: list[ProviderName],
+        text: str,
+        target_language: str,
+        source_language: str | None,
+    ) -> TranslationResponse:
         char_count = len(text)
-        candidates = self.provider_order
         errors: list[str] = []
 
         for provider_name in candidates:
@@ -109,6 +134,18 @@ class TranslationRouter:
 
         raise HTTPException(status_code=503, detail=f"No provider available. {'; '.join(errors)}")
 
+    async def translate(self, text: str, target_language: str, source_language: str | None) -> TranslationResponse:
+        return await self._translate_with_candidates(self.provider_order, text, target_language, source_language)
+
+    async def translate_with_provider(
+        self,
+        provider: ProviderName,
+        text: str,
+        target_language: str,
+        source_language: str | None,
+    ) -> TranslationResponse:
+        return await self._translate_with_candidates([provider], text, target_language, source_language)
+
 
 def create_app() -> FastAPI:
     settings = load_settings()
@@ -140,6 +177,10 @@ def create_app() -> FastAPI:
     async def usage() -> UsageResponse:
         return router.provider_usage()
 
+    @app.get("/usage/{provider}", response_model=ProviderUsageDetails, dependencies=[Depends(require_api_key)])
+    async def usage_by_provider(provider: ProviderName) -> ProviderUsageDetails:
+        return router.provider_usage_details(provider)
+
     @app.post("/translate", response_model=TranslationResponse, dependencies=[Depends(require_api_key)])
     async def translate(req: TranslationRequest) -> TranslationResponse:
         try:
@@ -164,6 +205,13 @@ def create_app() -> FastAPI:
         tasks = [one(index, item) for index, item in enumerate(req.requests)]
         results = await asyncio.gather(*tasks)
         return BatchTranslationResponse(results=results)
+
+    @app.post("/translate/{provider}", response_model=TranslationResponse, dependencies=[Depends(require_api_key)])
+    async def translate_by_provider(provider: ProviderName, req: TranslationRequest) -> TranslationResponse:
+        try:
+            return await router.translate_with_provider(provider, req.text, req.target_language, req.source_language)
+        except ProviderError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     return app
 

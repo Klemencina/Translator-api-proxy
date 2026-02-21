@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
+
+
+ProviderName = Literal["deepl", "microsoft", "google", "microsoft_paid"]
 
 
 class TranslationRequest(BaseModel):
@@ -47,3 +52,15 @@ class ProviderUsage(BaseModel):
 class UsageResponse(BaseModel):
     month: str
     providers: list[ProviderUsage]
+
+
+class ProviderUsageDetails(BaseModel):
+    provider: ProviderName
+    used_characters: int
+    monthly_quota: int
+    remaining_characters: int
+    current_minute: str
+    requests_this_minute: int
+    source_characters_this_minute: int
+    requests_per_minute_limit: int
+    source_characters_per_minute_limit: int
