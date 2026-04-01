@@ -1,0 +1,15 @@
+services:
+  translator-api-proxy:
+    build:
+      context: .
+    env_file:
+      - .env
+    environment:
+      USAGE_DB_PATH: /data/usage.db
+    ports:
+      - "8000:8000"
+    volumes:
+      - translator_api_proxy_data:/data
+
+volumes:
+  translator_api_proxy_data:

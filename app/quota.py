@@ -3,11 +3,13 @@ from __future__ import annotations
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 
 
 class QuotaStore:
     def __init__(self, db_path: str) -> None:
         self.db_path = db_path
+        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
     @contextmanager

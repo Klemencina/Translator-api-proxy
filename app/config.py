@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 
 DEFAULT_MICROSOFT_TRANSLATOR_ENDPOINT = "https://api.cognitive.microsofttranslator.com/translate"
@@ -75,6 +76,18 @@ def _first_env(names: list[str], default: str | None = None) -> str | None:
     return default
 
 
+def _default_database_path() -> str:
+    configured_path = _env("USAGE_DB_PATH")
+    if configured_path is not None:
+        return configured_path
+
+    # In the container image, /data is the intended mount point for persistent storage.
+    if Path("/data").is_dir():
+        return "/data/usage.db"
+
+    return "usage.db"
+
+
 def load_settings() -> Settings:
     microsoft_location = _first_env(["MICROSOFT_TRANSLATOR_LOCATION", "MICROSOFT_TRANSLATOR_REGION"])
     microsoft_endpoint = _env("MICROSOFT_TRANSLATOR_ENDPOINT", DEFAULT_MICROSOFT_TRANSLATOR_ENDPOINT)
@@ -93,7 +106,7 @@ def load_settings() -> Settings:
     microsoft_source_chars_per_minute = _int_env("MICROSOFT_SOURCE_CHARS_PER_MINUTE", 100_000)
 
     return Settings(
-        database_path=os.getenv("USAGE_DB_PATH", "usage.db"),
+        database_path=_default_database_path(),
         google_api_key=os.getenv("GOOGLE_API_KEY"),
         microsoft_api_key=_env("MICROSOFT_TRANSLATOR_KEY"),
         microsoft_location=microsoft_location,

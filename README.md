@@ -22,6 +22,14 @@ pip install -e .
 uvicorn app.main:app --reload
 ```
 
+For local non-Docker runs, the SQLite file defaults to `usage.db` in the project root.
+
+For Docker runs, the app prefers `/data/usage.db`. Mount `/data` to persistent storage so rebuilds do not reset usage data.
+
+```bash
+docker compose up --build
+```
+
 ## Deploy on Coolify
 
 This repo is ready for Dockerfile-based deployment in Coolify.
@@ -31,7 +39,7 @@ This repo is ready for Dockerfile-based deployment in Coolify.
 3. Exposed/internal port: `8000`.
 4. Health check path: `/health`.
 5. Add persistent storage and mount it to `/data`.
-6. Set `USAGE_DB_PATH=/data/usage.db` so usage tracking survives restarts.
+6. Set `USAGE_DB_PATH=/data/usage.db` so usage tracking survives restarts and rebuilds.
 7. Set `TRANSLATOR_API_KEY` to a long random secret.
 8. Add provider credentials (real mode):
     - `GOOGLE_API_KEY`
@@ -187,7 +195,7 @@ Practical implication for this proxy:
 
 | Variable | Default | Description |
 |---|---:|---|
-| `USAGE_DB_PATH` | `usage.db` | SQLite DB path for usage records |
+| `USAGE_DB_PATH` | `usage.db` locally, `/data/usage.db` in Docker | SQLite DB path for usage records |
 | `TRANSLATOR_API_KEY` | unset | If set, protects `/translate`, `/translate/batch`, and `/usage` |
 | `GOOGLE_API_KEY` | unset | Google Translate API key |
 | `MICROSOFT_TRANSLATOR_KEY` | unset | Microsoft Translator key |
